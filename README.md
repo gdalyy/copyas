@@ -51,24 +51,28 @@ Telegram are text-only composers that apply their own markup on send, so they
 get text.
 
 Claude Code's own clipboard write carries text only, so the HTML goes through
-a tool on the machine, the first found:
+a small helper per platform, shipped in `bin/`:
 
-| Platform | Tool | Targets served |
-|----------|------|----------------|
-| Linux    | `python3` with PyGObject + GTK 4 (`bin/clip.py`) | text/html and text/plain |
-| Wayland  | `wl-copy` (wl-clipboard) | text/html only |
-| X11      | `xclip` | text/html only |
-| macOS    | `osascript` | HTML only |
+| Platform | How | Targets | Tested |
+|----------|-----|---------|--------|
+| Linux (X11, Wayland) | `python3` + PyGObject + GTK 4 (`bin/clip.py`) | text/html + text/plain | yes |
+| Linux, no GTK bindings | `wl-copy` (Wayland) or `xclip` (X11) | text/html only | yes |
+| macOS | `osascript -l JavaScript` (`bin/clip.jxa.js`), no install | HTML + plain text | not yet |
+| Windows | Windows PowerShell 5.1 (`bin/clip.ps1`), no install | CF_HTML + Unicode text | not yet |
+| WSL | `powershell.exe` from inside WSL, paths via `wslpath` | CF_HTML + Unicode text | not yet |
 
 On X11 and Wayland the clipboard lives in the process that owns it, so the
-helper leaves a small detached owner behind. It exits by itself as soon as
-another application copies something, and it survives the Claude Code session
-that made it, so the copy is still there after you close the terminal.
+Linux helper leaves a small detached owner behind. It exits by itself as soon
+as another application copies something, and it survives the Claude Code
+session that made it. macOS and Windows keep clipboard content in the system,
+so their helpers simply exit.
 
-When none is available the text form is copied through Claude Code's normal
-path (a clipboard tool, else the OSC 52 terminal escape) and the command says
-so. On Debian/Ubuntu, `sudo apt install python3-gi gir1.2-gtk-4.0` gives the
-best path; `wl-clipboard` or `xclip` are the lighter alternatives.
+When no helper works the text form is copied through Claude Code's normal
+path (`pbcopy`, `clip.exe`, `xclip`, `wl-copy`, else the OSC 52 terminal
+escape) and the command says why. That path works on every platform, so the
+plugin always copies something. On Debian/Ubuntu, `sudo apt install python3-gi
+gir1.2-gtk-4.0` gives the best Linux path; `wl-clipboard` or `xclip` are the
+lighter alternatives.
 
 Slack's paste handler is the pickiest: the Slack HTML form writes headings as
 bold paragraphs, tables as preformatted text, nested lists as indented glyph

@@ -10,7 +10,7 @@ const COMMAND = 'copyas'
 // (Slack, Jira Cloud, Gmail, Outlook, Google Docs, Notion) goes through here.
 // (Kept in this file: the validator follows `$` only within one module.)
 
-type RichBackend = 'gtk' | 'wl-copy' | 'xclip' | 'osascript'
+type RichBackend = 'gtk' | 'wl-copy' | 'xclip' | 'osascript' | 'powershell'
 
 type RichResult = { isCopied: true; backend: RichBackend } | { isCopied: false; reason: string }
 
@@ -27,21 +27,36 @@ async function has($: EngineInterface, argv: readonly string[]): Promise<boolean
   }
 }
 
-/** Finds a tool on this machine that can own the clipboard with HTML; cached per load. */
+/** Finds the way to own the clipboard with HTML on this machine; a hit is cached per load. */
 function probeRichBackend($: EngineInterface): Promise<Probe | undefined> {
   probed ??= (async () => {
+    const bin = `${$.plugin.root}/bin`
+    if ((await $.env.get('OS')) === 'Windows_NT') {
+      // Windows PowerShell 5.1 ships with Windows; the script needs an STA thread for the clipboard
+      return {
+        backend: 'powershell',
+        argv: ['powershell', '-NoProfile', '-STA', '-ExecutionPolicy', 'Bypass', '-File', `${bin}/clip.ps1`, '-Path'],
+      }
+    }
     const uname = await $.process.run(['uname', '-s'], { timeoutMs: 5000 }).catch(() => undefined)
     const os = uname?.stdout.trim() ?? ''
-    if (os === 'Darwin') return { backend: 'osascript', argv: ['osascript'] }
+    if (os === 'Darwin') return { backend: 'osascript', argv: ['osascript', '-l', 'JavaScript', `${bin}/clip.jxa.js`] }
+    if (os === 'Linux' && (await $.env.get('WSL_DISTRO_NAME')) && (await has($, ['which', 'powershell.exe']))) {
+      // WSL: the Windows clipboard through Windows PowerShell; paths are translated with wslpath
+      const script = await $.process.run(['wslpath', '-w', `${bin}/clip.ps1`], { timeoutMs: 5000 }).catch(() => undefined)
+      if (script && script.exitCode === 0)
+        return {
+          backend: 'powershell',
+          argv: ['powershell.exe', '-NoProfile', '-STA', '-ExecutionPolicy', 'Bypass', '-File', script.stdout.trim(), '-Path'],
+        }
+    }
     if (os === 'Linux') {
-      const helper = `${$.plugin.root}/bin/clip.py`
       // GTK 4 through PyGObject serves text/html and text/plain together
       if (await has($, ['python3', '-c', 'import gi; gi.require_version("Gdk", "4.0"); gi.require_version("Gtk", "4.0"); from gi.repository import Gdk, Gtk']))
-        return { backend: 'gtk', argv: ['python3', helper] }
+        return { backend: 'gtk', argv: ['python3', `${bin}/clip.py`] }
       if ((await $.env.get('WAYLAND_DISPLAY')) && (await has($, ['which', 'wl-copy'])))
         return { backend: 'wl-copy', argv: ['wl-copy', '--type', 'text/html'] }
-      if (await has($, ['which', 'xclip']))
-        return { backend: 'xclip', argv: ['xclip', '-selection', 'clipboard', '-t', 'text/html'] }
+      if (await has($, ['which', 'xclip'])) return { backend: 'xclip', argv: ['xclip', '-selection', 'clipboard', '-t', 'text/html'] }
     }
     return undefined
   })()
@@ -53,28 +68,52 @@ function probeRichBackend($: EngineInterface): Promise<Probe | undefined> {
 }
 
 /**
- * Puts `html` on the clipboard as text/html (and `text` as the plain target
- * where the tool can serve both). The owning process stays alive in the
- * background until another application takes the clipboard.
+ * Puts `html` on the clipboard as text/html and `text` as the plain target
+ * (where the tool can serve both). On Linux the tool leaves a detached owner
+ * behind, since an X11 or Wayland clipboard lives in its owning process.
  */
 async function copyRich($: EngineInterface, html: string, text: string): Promise<RichResult> {
   const probe = await probeRichBackend($)
   if (!probe) return { isCopied: false, reason: 'no rich clipboard tool on this machine' }
+  const payload = JSON.stringify({ html, text })
 
-  if (probe.backend === 'osascript') {
-    const hex = Array.from(new TextEncoder().encode(html), b => b.toString(16).padStart(2, '0')).join('')
-    const ran = await $.process
-      .run(['osascript', '-e', `set the clipboard to «data HTML${hex}»`], { timeoutMs: 10000 })
-      .catch(() => undefined)
-    return ran?.exitCode === 0
-      ? { isCopied: true, backend: 'osascript' }
-      : { isCopied: false, reason: `osascript failed: ${ran?.stderr.trim() || 'could not start'}` }
+  if (probe.backend === 'powershell') {
+    // the payload goes through a UTF-8 file: console stdin encoding on Windows is not reliable
+    const home = (await $.env.get('USERPROFILE')) ?? (await $.env.get('HOME'))
+    if (!home) return { isCopied: false, reason: 'no user profile folder for the clipboard payload' }
+    const file = `${home}/.claude/copyas/clip.json`
+    try {
+      await $.fs.write(file, payload)
+      let arg = file
+      if (probe.argv[0] === 'powershell.exe') {
+        // under WSL the Linux path must be spelled the Windows way
+        const win = await $.process.run(['wslpath', '-w', file], { timeoutMs: 5000 })
+        if (win.exitCode !== 0) return { isCopied: false, reason: 'wslpath could not translate the payload path' }
+        arg = win.stdout.trim()
+      }
+      const ran = await $.process.run([...probe.argv, arg], { timeoutMs: 15000 })
+      return ran.exitCode === 0 && ran.stdout.includes('ready')
+        ? { isCopied: true, backend: 'powershell' }
+        : { isCopied: false, reason: `powershell failed: ${ran.stderr.trim().split('\n')[0] || `exit ${ran.exitCode}`}` }
+    } catch (err) {
+      return { isCopied: false, reason: `powershell failed: ${err instanceof Error ? err.message : String(err)}` }
+    }
   }
 
-  const input = probe.backend === 'gtk' ? JSON.stringify({ html, text }) : html
-  // each tool detaches an owner of its own (the helper forks; wl-copy and xclip
-  // daemonize), so the clipboard outlives this session and a plugin reload
-  const child = $.process.spawn({ argv: probe.argv, input })
+  if (probe.backend === 'osascript') {
+    try {
+      const ran = await $.process.run(probe.argv, { stdin: payload, timeoutMs: 15000 })
+      return ran.exitCode === 0 && ran.stdout.includes('ready')
+        ? { isCopied: true, backend: 'osascript' }
+        : { isCopied: false, reason: `osascript failed: ${ran.stderr.trim().split('\n')[0] || `exit ${ran.exitCode}`}` }
+    } catch (err) {
+      return { isCopied: false, reason: `osascript failed: ${err instanceof Error ? err.message : String(err)}` }
+    }
+  }
+
+  // Linux: each tool detaches an owner of its own (the helper forks; wl-copy and
+  // xclip daemonize), so the clipboard outlives this session and a plugin reload
+  const child = $.process.spawn({ argv: probe.argv, input: probe.backend === 'gtk' ? payload : html })
 
   return new Promise<RichResult>(resolve => {
     let settled = false
@@ -104,7 +143,6 @@ async function copyRich($: EngineInterface, html: string, text: string): Promise
   })
 }
 
-
 const USAGE = [
   'Usage: /copyas [destination] [N] [turn] [text]',
   '',
@@ -114,8 +152,8 @@ const USAGE = [
   '"turn" copies every reply of that turn, not only the final one.',
   '"text" skips the rich clipboard and copies the text form only.',
   'The result is also saved to ~/.claude/copyas/last.<ext>.',
-  'Rich text (Slack, Teams, Jira, email, docs) needs a clipboard tool: on Debian/Ubuntu',
-  '  sudo apt install python3-gi gir1.2-gtk-4.0   (or wl-clipboard / xclip)',
+  'Rich text (Slack, Teams, Jira, email, docs) works out of the box on macOS and Windows.',
+  'On Linux it needs one tool: sudo apt install python3-gi gir1.2-gtk-4.0 (or wl-clipboard / xclip).',
 ].join('\n')
 
 type Picked = { text: string; count: number }

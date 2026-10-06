@@ -2,6 +2,9 @@
 
 ## 0.2.0 — 2026-10-06
 
+- Rich text on macOS (JavaScript for Automation), Windows (PowerShell, CF_HTML) and WSL,
+  with no install; Linux keeps the GTK helper, `wl-copy` and `xclip`.
+
 - The clipboard owner detaches from the session: a copy survives closing Claude Code
   or reloading the plugin, and the owner exits when another app copies.
 - A failing command answers with a one-line reason instead of a skipped hook.
