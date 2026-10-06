@@ -1,0 +1,57 @@
+{
+  "name": "copyas",
+  "displayName": "Copy As",
+  "version": "0.2.0",
+  "description": "Copy Claude's last reply to the clipboard for Slack, Teams, Discord, WhatsApp, Telegram, Jira, email, Google Docs, GitHub and more, as rich text or the right markup, free of terminal artifacts.",
+  "author": {
+    "name": "Ghaith Daly"
+  },
+  "homepage": "https://github.com/gdalyy/copyas",
+  "repository": "https://github.com/gdalyy/copyas",
+  "license": "MIT",
+  "keywords": [
+    "clipboard",
+    "copy",
+    "slack",
+    "jira",
+    "teams",
+    "discord",
+    "markdown",
+    "email",
+    "rich-text",
+    "formatting"
+  ],
+  "userConfig": {
+    "default_format": {
+      "title": "Default copy format",
+      "type": "string",
+      "description": "Destination used by /copyas when none is given (rich = email and documents)",
+      "options": [
+        "slack",
+        "teams",
+        "discord",
+        "whatsapp",
+        "telegram",
+        "jira",
+        "rich",
+        "md",
+        "raw",
+        "plain",
+        "html"
+      ],
+      "default": "slack"
+    },
+    "rich": {
+      "type": "boolean",
+      "title": "Rich clipboard",
+      "description": "Put formatted rich text (HTML) on the clipboard for Slack, Jira Cloud, email and docs, when a tool on this machine can carry it",
+      "default": true
+    },
+    "save_copy": {
+      "type": "boolean",
+      "title": "Save a copy to ~/.claude/copyas",
+      "description": "Also write the converted text (and HTML) to ~/.claude/copyas/last.* so it survives a failed clipboard write",
+      "default": true
+    }
+  }
+}

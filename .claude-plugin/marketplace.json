@@ -1,0 +1,12 @@
+{
+  "name": "copyas",
+  "owner": { "name": "Ghaith Daly" },
+  "description": "Copy Claude Code replies to the clipboard for Slack, Teams, Discord, WhatsApp, Telegram, Jira, email, docs, GitHub and more.",
+  "plugins": [
+    {
+      "name": "copyas",
+      "source": "./",
+      "description": "Copy Claude's last reply to the clipboard for Slack, Teams, Discord, WhatsApp, Telegram, Jira, email, docs, GitHub and more, as rich text or the right markup."
+    }
+  ]
+}
