@@ -117,6 +117,15 @@ claude plugin install copyas@copyas
 A plugin installed from a local folder runs from that folder directly: edit
 it, then `/reload-plugins` in a running session.
 
+Both the GitHub marketplace and a local checkout register under the name
+`copyas`, so Claude Code refuses to add the second one ("its source doesn't
+match its extraKnownMarketplaces entry"). To switch from one to the other,
+remove the existing marketplace first:
+
+```
+claude plugin marketplace remove copyas
+```
+
 ## Development
 
 ```
